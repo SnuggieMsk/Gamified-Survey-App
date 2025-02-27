@@ -415,6 +415,170 @@
       }
     }
     
+    // Update generateQuestions to fix the AI generation issue
+    function generateQuestions() {
+      if (!validateInputs()) return;
+      aiLoader.style.display = 'block';
+      statusDiv.textContent = 'Generating questions...';
+      errorDiv.textContent = '';
+      
+      // Update productData with current form values
+      productData = {
+        name: productNameInput.value.trim(),
+        description: productDescriptionInput.value.trim(),
+        imageUrl: productData.imageUrl,
+        studyParameters: studyParametersInput.value.trim()
+      };
+      
+      const numQuestions = parseInt(numQuestionsInput.value);
+      
+      // Simulate an API call with a timeout
+      setTimeout(() => {
+        try {
+          questions = generateSampleQuestions(productData, numQuestions);
+          displayQuestionsForReview(questions);
+          aiLoader.style.display = 'none';
+          statusDiv.textContent = 'Questions generated successfully!';
+          questionPreviewSection.classList.remove('hidden');
+        } catch (error) {
+          aiLoader.style.display = 'none';
+          errorDiv.textContent = 'Error generating questions: ' + error.message;
+          console.error('Error generating questions:', error);
+        }
+      }, 1500);
+    }
+    
+    // Validate user inputs
+    function validateInputs() {
+      let isValid = true;
+      errorDiv.textContent = '';
+      if (!productNameInput.value.trim()) {
+        errorDiv.textContent += 'Please enter a product name. ';
+        isValid = false;
+      }
+      if (!productDescriptionInput.value.trim()) {
+        errorDiv.textContent += 'Please enter a product description. ';
+        isValid = false;
+      }
+      if (!studyParametersInput.value.trim()) {
+        errorDiv.textContent += 'Please enter study parameters. ';
+        isValid = false;
+      }
+      const numQuestions = parseInt(numQuestionsInput.value);
+      if (isNaN(numQuestions) || numQuestions < 1 || numQuestions > 20) {
+        errorDiv.textContent += 'Please enter a valid number of questions (1-20). ';
+        isValid = false;
+      }
+      return isValid;
+    }
+    
+    // Generate sample questions (for demo purposes)
+    function generateSampleQuestions(productData, numQuestions) {
+      const questionTypes = [
+        `How would you rate the overall design of the ${productData.name}?`,
+        `What feature of the ${productData.name} do you find most appealing?`,
+        `How likely are you to recommend the ${productData.name} to a friend?`,
+        `What would make you purchase the ${productData.name}?`,
+        `How much would you be willing to pay for the ${productData.name}?`,
+        `What improvement would you suggest for the ${productData.name}?`,
+        `How does the ${productData.name} compare to similar products you've used?`,
+        `What is your first impression of the ${productData.name}?`,
+        `How important is sustainability in your decision to purchase the ${productData.name}?`,
+        `What colors would you prefer for the ${productData.name}?`
+      ];
+      const sampleQuestions = [];
+      const questionsToGenerate = Math.min(numQuestions, questionTypes.length);
+      const selectedQuestionIndices = new Set();
+      while (selectedQuestionIndices.size < questionsToGenerate) {
+        selectedQuestionIndices.add(Math.floor(Math.random() * questionTypes.length));
+      }
+      Array.from(selectedQuestionIndices).forEach(index => {
+        const question = questionTypes[index];
+        let options = [];
+        if (question.includes('rate')) {
+          options = ['Poor', 'Fair', 'Good', 'Very Good', 'Excellent'];
+        } else if (question.includes('likely')) {
+          options = ['Not at all likely', 'Somewhat unlikely', 'Neutral', 'Somewhat likely', 'Very likely'];
+        } else if (question.includes('willing to pay')) {
+          options = ['$10-$20', '$21-$50', '$51-$100', '$101-$200', 'More than $200'];
+        } else if (question.includes('colors')) {
+          options = ['Black', 'White', 'Blue', 'Red', 'Green'];
+        } else if (question.includes('important')) {
+          options = ['Not important', 'Slightly important', 'Moderately important', 'Very important', 'Extremely important'];
+        } else {
+          options = ['Option 1', 'Option 2', 'Option 3', 'Option 4'];
+        }
+        sampleQuestions.push({
+          question: question,
+          options: options
+        });
+      });
+      return sampleQuestions;
+    }
+    
+    // Display questions for review (read-only) in admin mode
+    function displayQuestionsForReview(questions) {
+      generatedQuestionsPreview.innerHTML = '';
+      questions.forEach((q, index) => {
+        const questionElement = document.createElement('div');
+        questionElement.className = 'card';
+        questionElement.innerHTML = `
+          <h3>Question ${index + 1}</h3>
+          <p>${q.question}</p>
+          <p><strong>Options:</strong> ${q.options.join(', ')}</p>
+        `;
+        generatedQuestionsPreview.appendChild(questionElement);
+      });
+    }
+    
+    // Function to load a survey by ID
+    function loadSurveyById(id) {
+      const storedSurveyJSON = localStorage.getItem(STORAGE_PREFIX + id);
+      if (!storedSurveyJSON) {
+        alert('Survey not found!');
+        return;
+      }
+      
+      const storedSurvey = JSON.parse(storedSurveyJSON);
+      surveyID = storedSurvey.id;
+      questions = storedSurvey.questions;
+      
+      if (!isPublishedMode) {
+        // Admin mode - loading for editing
+        productData = {
+          name: storedSurvey.title || "Unnamed Survey",
+          description: storedSurvey.description || "",
+          studyParameters: storedSurvey.studyParameters || "",
+          imageUrl: storedSurvey.imageUrl || ""
+        };
+        
+        // Fill the form fields
+        productNameInput.value = productData.name;
+        productDescriptionInput.value = productData.description;
+        studyParametersInput.value = productData.studyParameters;
+        
+        if (productData.imageUrl) {
+          const img = document.createElement('img');
+          img.src = productData.imageUrl;
+          productImagePreview.innerHTML = '';
+          productImagePreview.appendChild(img);
+        }
+        
+        displayQuestionsForReview(questions);
+        questionPreviewSection.classList.remove('hidden');
+      } else {
+        // Respondent mode - taking the survey
+        productData.name = storedSurvey.title || "Published Survey";
+        setupSection.style.display = "none";
+        questionPreviewSection.style.display = "none";
+        surveySection.classList.remove("hidden");
+        surveyFlashcard.style.display = "block";
+        currentQuestionIndex = 0;
+        responses = Array(questions.length).fill(null);
+        displayCurrentQuestion();
+      }
+    }
+    
     // Update finishSurvey to store responses locally
     function finishSurvey() {
       const formattedResponses = questions.map((q, index) => ({
@@ -810,94 +974,6 @@
       } else {
         finishSurvey();
       }
-    }
-    
-    // Edit questions using editable input fields (admin mode only)
-    function editQuestions() {
-      generatedQuestionsPreview.innerHTML = '';
-      questions.forEach((q, index) => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        const questionTitle = document.createElement('h3');
-        questionTitle.textContent = `Question ${index + 1}`;
-        card.appendChild(questionTitle);
-        const questionInput = document.createElement('input');
-        questionInput.type = 'text';
-        questionInput.value = q.question;
-        questionInput.id = `question-${index}`;
-        questionInput.style.width = '100%';
-        questionInput.style.marginBottom = '10px';
-        card.appendChild(questionInput);
-        const optionsEditContainer = document.createElement('div');
-        optionsEditContainer.id = `options-${index}`;
-        q.options.forEach((option, optIndex) => {
-          const optionInput = document.createElement('input');
-          optionInput.type = 'text';
-          optionInput.value = option;
-          optionInput.id = `question-${index}-option-${optIndex}`;
-          optionInput.className = 'option-input';
-          optionInput.style.width = '100%';
-          optionInput.style.marginBottom = '5px';
-          optionsEditContainer.appendChild(optionInput);
-        });
-        card.appendChild(optionsEditContainer);
-        const addOptionBtn = document.createElement('button');
-        addOptionBtn.textContent = 'Add Option';
-        addOptionBtn.addEventListener('click', () => {
-          const newOptionInput = document.createElement('input');
-          newOptionInput.type = 'text';
-          newOptionInput.placeholder = 'New option';
-          newOptionInput.className = 'option-input';
-          newOptionInput.style.width = '100%';
-          newOptionInput.style.marginBottom = '5px';
-          optionsEditContainer.appendChild(newOptionInput);
-        });
-        card.appendChild(addOptionBtn);
-        generatedQuestionsPreview.appendChild(card);
-      });
-      editQuestionsBtn.style.display = 'none';
-      const saveEditBtn = document.createElement('button');
-      saveEditBtn.textContent = 'Save Edited Questions';
-      saveEditBtn.id = 'saveEditBtn';
-      saveEditBtn.addEventListener('click', saveEditedQuestions);
-      generatedQuestionsPreview.appendChild(saveEditBtn);
-    }
-    
-    // Save changes from edit mode (admin mode)
-    function saveEditedQuestions() {
-      questions.forEach((q, index) => {
-        const questionInput = document.getElementById(`question-${index}`);
-        if (questionInput) {
-          q.question = questionInput.value;
-        }
-        const optionInputs = document.querySelectorAll(`#options-${index} .option-input`);
-        const newOptions = [];
-        optionInputs.forEach(input => {
-          if (input.value.trim() !== '') {
-            newOptions.push(input.value);
-          }
-        });
-        if (newOptions.length > 0) {
-          q.options = newOptions;
-        }
-      });
-      displayQuestionsForReview(questions);
-      editQuestionsBtn.style.display = 'inline-block';
-    }
-    
-    // Display questions for review (read-only) in admin mode
-    function displayQuestionsForReview(questions) {
-      generatedQuestionsPreview.innerHTML = '';
-      questions.forEach((q, index) => {
-        const questionElement = document.createElement('div');
-        questionElement.className = 'card';
-        questionElement.innerHTML = `
-          <h3>Question ${index + 1}</h3>
-          <p>${q.question}</p>
-          <p><strong>Options:</strong> ${q.options.join(', ')}</p>
-        `;
-        generatedQuestionsPreview.appendChild(questionElement);
-      });
     }
     
     document.addEventListener('DOMContentLoaded', init);
