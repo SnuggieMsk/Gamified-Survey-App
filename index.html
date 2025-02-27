@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI-Powered Product Survey</title>
+  <script src="https://accounts.google.com/gsi/client"></script>
+  <script src="https://apis.google.com/js/api.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f9f9f9;
+    }
+    .container {
+      background-color: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+    }
+    h1, h2 {
+      color: #333;
+    }
+    button {
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 5px 0;
+    }
+    button:hover {
+      background-color: #3367d6;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      font-size: 16px;
+    }
+    textarea {
+      height: 100px;
+    }
+    .card {
+      border: 1px solid #ddd;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 5px;
+      background-color: white;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    .flashcard {
+      display: none;
+      text-align: center;
+      min-height: 200px;
+      position: relative;
+      padding: 20px;
+    }
+    .question {
+      font-size: 18px;
+      margin-bottom: 20px;
+    }
+    .options {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .option-btn {
+      padding: 10px;
+      background-color: #e8f0fe;
+      border: 1px solid #ccc;
+      color: #333;
+    }
+    .option-btn:hover {
+      background-color: #d2e3fc;
+    }
+    .progress {
+      margin-top: 20px;
+      height: 10px;
+      background-color: #f0f0f0;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background-color: #4285f4;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .nav-buttons {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 20px;
+    }
+    .hidden {
+      display: none;
+    }
+    #uploadSection {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      border: 2px dashed #ccc;
+      border-radius: 5px;
+      margin-bottom: 20px;
+    }
+    #uploadSection img {
+      max-width: 100%;
+      max-height: 300px;
+      margin-top: 10px;
+    }
+    #status {
+      color: #4CAF50;
+      margin: 10px 0;
+    }
+    #error {
+      color: #F44336;
+      margin: 10px 0;
+    }
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 2s linear infinite;
+      margin: 10px auto;
+      display: none;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AI-Powered Product Survey</h1>
+    <!-- Setup Section -->
+    <div id="setupSection">
+      <div class="card">
+        <h2>Step 1: Upload Product Information</h2>
+        <div id="uploadSection">
+          <label for="productImage">Upload Product Image:</label>
+          <input type="file" id="productImage" accept="image/*" />
+          <div id="productImagePreview"></div>
+        </div>
+        <div class="input-group">
+          <label for="productName">Product Name:</label>
+          <input type="text" id="productName" placeholder="Enter product name" />
+        </div>
+        <div class="input-group">
+          <label for="productDescription">Product Description:</label>
+          <textarea id="productDescription" placeholder="Enter detailed product description"></textarea>
+        </div>
+        <div class="input-group">
+          <label for="studyParameters">Study Parameters:</label>
+          <textarea id="studyParameters" placeholder="Enter what you want to study about this product (e.g., user experience, design preferences, pricing)"></textarea>
+        </div>
+        <div class="input-group">
+          <label for="numQuestions">Number of Questions:</label>
+          <input type="number" id="numQuestions" min="1" max="20" value="5" />
+        </div>
+        <button id="generateQuestionsBtn">Generate Questions with AI</button>
+        <div class="loader" id="aiLoader"></div>
+        <div id="status"></div>
+        <div id="error"></div>
+      </div>
+      <div class="card hidden" id="questionPreviewSection">
+        <h2>Step 2: Review Generated Questions</h2>
+        <div id="generatedQuestionsPreview"></div>
+        <button id="editQuestionsBtn">Edit Questions</button>
+        <button id="startSurveyBtn">Start Survey</button>
+      </div>
+      <div class="card hidden" id="authSection">
+        <h2>Step 3: Connect Google Sheets</h2>
+        <p>To save survey responses, please connect to your Google account:</p>
+        <div id="googleAuthButton"></div>
+        <div id="authStatus"></div>
+      </div>
+    </div>
+    <!-- Survey Section -->
+    <div id="surveySection" class="hidden">
+      <h2>Product Survey</h2>
+      <div class="flashcard" id="surveyFlashcard">
+        <div class="question" id="currentQuestion"></div>
+        <div class="options" id="optionsContainer"></div>
+        <div class="progress">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="nav-buttons">
+          <button id="prevBtn" disabled>Previous</button>
+          <button id="nextBtn" disabled>Next</button>
+        </div>
+      </div>
+      <div class="hidden" id="surveyCompleteSection">
+        <h2>Survey Complete!</h2>
+        <p>Thank you for completing the survey. Your responses have been recorded.</p>
+        <button id="newSurveyBtn">Create New Survey</button>
+        <button id="shareSurveyBtn">Share Survey</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    // Global variables
+    let productData = {
+      name: '',
+      description: '',
+      imageUrl: '',
+      studyParameters: ''
+    };
+    let questions = [];
+    let currentQuestionIndex = 0;
+    let responses = [];
+    let googleAuth = null;
+    let googleSheetsInitialized = false;
+    const GEMINI_API_KEY = "AIzaSyA8R_U1pHmh78Qs3q1PWbAJF_qTgsDFGBc";
+    // Google Apps Script endpoint URL (Google Sheet backend)
+    const webAppUrl = "https://script.google.com/macros/s/AKfycbxr0dsUlNKFttZ3Vy6o8WhNNI3QdF0xxXICEOQwTj6kEuFD3l9xGqtZeOh3hvX6hfrC/exec";
+    
+    // DOM elements
+    const setupSection = document.getElementById('setupSection');
+    const surveySection = document.getElementById('surveySection');
+    const generateQuestionsBtn = document.getElementById('generateQuestionsBtn');
+    const productNameInput = document.getElementById('productName');
+    const productDescriptionInput = document.getElementById('productDescription');
+    const studyParametersInput = document.getElementById('studyParameters');
+    const numQuestionsInput = document.getElementById('numQuestions');
+    const productImageInput = document.getElementById('productImage');
+    const productImagePreview = document.getElementById('productImagePreview');
+    const questionPreviewSection = document.getElementById('questionPreviewSection');
+    const generatedQuestionsPreview = document.getElementById('generatedQuestionsPreview');
+    const editQuestionsBtn = document.getElementById('editQuestionsBtn');
+    const startSurveyBtn = document.getElementById('startSurveyBtn');
+    const surveyFlashcard = document.getElementById('surveyFlashcard');
+    const currentQuestionElement = document.getElementById('currentQuestion');
+    const optionsContainer = document.getElementById('optionsContainer');
+    const progressBar = document.getElementById('progressBar');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const surveyCompleteSection = document.getElementById('surveyCompleteSection');
+    const newSurveyBtn = document.getElementById('newSurveyBtn');
+    const shareSurveyBtn = document.getElementById('shareSurveyBtn');
+    const authSection = document.getElementById('authSection');
+    const authStatus = document.getElementById('authStatus');
+    const statusDiv = document.getElementById('status');
+    const errorDiv = document.getElementById('error');
+    const aiLoader = document.getElementById('aiLoader');
+    
+    // Initialize the application
+    function init() {
+      generateQuestionsBtn.addEventListener('click', generateQuestions);
+      editQuestionsBtn.addEventListener('click', editQuestions);
+      startSurveyBtn.addEventListener('click', startSurvey);
+      prevBtn.addEventListener('click', showPreviousQuestion);
+      nextBtn.addEventListener('click', showNextQuestion);
+      newSurveyBtn.addEventListener('click', resetSurvey);
+      shareSurveyBtn.addEventListener('click', shareSurvey);
+      productImageInput.addEventListener('change', handleImageUpload);
+      gapi.load('client', initGoogleSheetsAPI);
+    }
+    
+    // Handle product image upload
+    function handleImageUpload(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const img = document.createElement('img');
+          img.src = e.target.result;
+          productData.imageUrl = e.target.result;
+          productImagePreview.innerHTML = '';
+          productImagePreview.appendChild(img);
+        }
+        reader.readAsDataURL(file);
+      }
+    }
+    
+    // Initialize Google Sheets API (for auth, if needed)
+    function initGoogleSheetsAPI() {
+      gapi.client.init({
+        apiKey: GEMINI_API_KEY,
+        discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"],
+      }).then(function() {
+        googleSheetsInitialized = true;
+        const googleAuthButton = document.getElementById('googleAuthButton');
+        googleAuthButton.innerHTML = `
+          <div id="g_id_onload"
+            data-client_id="YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com" 
+            data-callback="handleCredentialResponse">
+          </div>
+          <div class="g_id_signin" data-type="standard"></div>
+        `;
+        authStatus.textContent = "Note: In a production app, this would connect to Google Sheets. For this demo, responses will be stored locally.";
+      }).catch(function(error) {
+        console.error('Error initializing Google Sheets API:', error);
+        authStatus.textContent = "Google Sheets API could not be initialized. Responses will be stored locally.";
+      });
+    }
+    
+    // Generate questions using a simulated Gemini API response
+    async function generateQuestions() {
+      if (!validateInputs()) return;
+      aiLoader.style.display = 'block';
+      statusDiv.textContent = 'Generating questions...';
+      errorDiv.textContent = '';
+      productData = {
+        name: productNameInput.value,
+        description: productDescriptionInput.value,
+        imageUrl: productData.imageUrl,
+        studyParameters: studyParametersInput.value
+      };
+      const numQuestions = parseInt(numQuestionsInput.value);
+      try {
+        setTimeout(() => {
+          questions = generateSampleQuestions(productData, numQuestions);
+          displayQuestionsForReview(questions);
+          aiLoader.style.display = 'none';
+          statusDiv.textContent = 'Questions generated successfully!';
+          questionPreviewSection.classList.remove('hidden');
+        }, 1500);
+      } catch (error) {
+        aiLoader.style.display = 'none';
+        errorDiv.textContent = `Error generating questions: ${error.message}`;
+        console.error('Error generating questions:', error);
+      }
+    }
+    
+    // Validate user inputs
+    function validateInputs() {
+      let isValid = true;
+      errorDiv.textContent = '';
+      if (!productNameInput.value.trim()) {
+        errorDiv.textContent += 'Please enter a product name. ';
+        isValid = false;
+      }
+      if (!productDescriptionInput.value.trim()) {
+        errorDiv.textContent += 'Please enter a product description. ';
+        isValid = false;
+      }
+      if (!studyParametersInput.value.trim()) {
+        errorDiv.textContent += 'Please enter study parameters. ';
+        isValid = false;
+      }
+      const numQuestions = parseInt(numQuestionsInput.value);
+      if (isNaN(numQuestions) || numQuestions < 1 || numQuestions > 20) {
+        errorDiv.textContent += 'Please enter a valid number of questions (1-20). ';
+        isValid = false;
+      }
+      return isValid;
+    }
+    
+    // Generate sample questions (for demo purposes)
+    function generateSampleQuestions(productData, numQuestions) {
+      const questionTypes = [
+        `How would you rate the overall design of the ${productData.name}?`,
+        `What feature of the ${productData.name} do you find most appealing?`,
+        `How likely are you to recommend the ${productData.name} to a friend?`,
+        `What would make you purchase the ${productData.name}?`,
+        `How much would you be willing to pay for the ${productData.name}?`,
+        `What improvement would you suggest for the ${productData.name}?`,
+        `How does the ${productData.name} compare to similar products you've used?`,
+        `What is your first impression of the ${productData.name}?`,
+        `How important is sustainability in your decision to purchase the ${productData.name}?`,
+        `What colors would you prefer for the ${productData.name}?`
+      ];
+      const sampleQuestions = [];
+      const questionsToGenerate = Math.min(numQuestions, questionTypes.length);
+      const selectedQuestionIndices = new Set();
+      while (selectedQuestionIndices.size < questionsToGenerate) {
+        selectedQuestionIndices.add(Math.floor(Math.random() * questionTypes.length));
+      }
+      Array.from(selectedQuestionIndices).forEach(index => {
+        const question = questionTypes[index];
+        let options = [];
+        if (question.includes('rate')) {
+          options = ['Poor', 'Fair', 'Good', 'Very Good', 'Excellent'];
+        } else if (question.includes('likely')) {
+          options = ['Not at all likely', 'Somewhat unlikely', 'Neutral', 'Somewhat likely', 'Very likely'];
+        } else if (question.includes('willing to pay')) {
+          options = ['$10-$20', '$21-$50', '$51-$100', '$101-$200', 'More than $200'];
+        } else if (question.includes('colors')) {
+          options = ['Black', 'White', 'Blue', 'Red', 'Green'];
+        } else if (question.includes('important')) {
+          options = ['Not important', 'Slightly important', 'Moderately important', 'Very important', 'Extremely important'];
+        } else {
+          options = ['Option 1', 'Option 2', 'Option 3', 'Option 4'];
+        }
+        sampleQuestions.push({
+          question: question,
+          options: options
+        });
+      });
+      return sampleQuestions;
+    }
+    
+    // Display questions for review (read-only)
+    function displayQuestionsForReview(questions) {
+      generatedQuestionsPreview.innerHTML = '';
+      questions.forEach((q, index) => {
+        const questionElement = document.createElement('div');
+        questionElement.className = 'card';
+        questionElement.innerHTML = `
+          <h3>Question ${index + 1}</h3>
+          <p>${q.question}</p>
+          <p><strong>Options:</strong> ${q.options.join(', ')}</p>
+        `;
+        generatedQuestionsPreview.appendChild(questionElement);
+      });
+    }
+    
+    // Edit questions using editable input fields
+    function editQuestions() {
+      generatedQuestionsPreview.innerHTML = '';
+      questions.forEach((q, index) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const questionTitle = document.createElement('h3');
+        questionTitle.textContent = `Question ${index + 1}`;
+        card.appendChild(questionTitle);
+        const questionInput = document.createElement('input');
+        questionInput.type = 'text';
+        questionInput.value = q.question;
+        questionInput.id = `question-${index}`;
+        questionInput.style.width = '100%';
+        questionInput.style.marginBottom = '10px';
+        card.appendChild(questionInput);
+        const optionsEditContainer = document.createElement('div');
+        optionsEditContainer.id = `options-${index}`;
+        q.options.forEach((option, optIndex) => {
+          const optionInput = document.createElement('input');
+          optionInput.type = 'text';
+          optionInput.value = option;
+          optionInput.id = `question-${index}-option-${optIndex}`;
+          optionInput.className = 'option-input';
+          optionInput.style.width = '100%';
+          optionInput.style.marginBottom = '5px';
+          optionsEditContainer.appendChild(optionInput);
+        });
+        card.appendChild(optionsEditContainer);
+        const addOptionBtn = document.createElement('button');
+        addOptionBtn.textContent = 'Add Option';
+        addOptionBtn.addEventListener('click', () => {
+          const newOptionInput = document.createElement('input');
+          newOptionInput.type = 'text';
+          newOptionInput.placeholder = 'New option';
+          newOptionInput.className = 'option-input';
+          newOptionInput.style.width = '100%';
+          newOptionInput.style.marginBottom = '5px';
+          optionsEditContainer.appendChild(newOptionInput);
+        });
+        card.appendChild(addOptionBtn);
+        generatedQuestionsPreview.appendChild(card);
+      });
+      editQuestionsBtn.style.display = 'none';
+      const saveEditBtn = document.createElement('button');
+      saveEditBtn.textContent = 'Save Edited Questions';
+      saveEditBtn.id = 'saveEditBtn';
+      saveEditBtn.addEventListener('click', saveEditedQuestions);
+      generatedQuestionsPreview.appendChild(saveEditBtn);
+    }
+    
+    // Save changes from edit mode
+    function saveEditedQuestions() {
+      questions.forEach((q, index) => {
+        const questionInput = document.getElementById(`question-${index}`);
+        if (questionInput) {
+          q.question = questionInput.value;
+        }
+        const optionInputs = document.querySelectorAll(`#options-${index} .option-input`);
+        const newOptions = [];
+        optionInputs.forEach(input => {
+          if (input.value.trim() !== '') {
+            newOptions.push(input.value);
+          }
+        });
+        if (newOptions.length > 0) {
+          q.options = newOptions;
+        }
+      });
+      displayQuestionsForReview(questions);
+      editQuestionsBtn.style.display = 'inline-block';
+    }
+    
+    // Start the survey
+    function startSurvey() {
+      responses = Array(questions.length).fill(null);
+      setupSection.classList.add('hidden');
+      surveySection.classList.remove('hidden');
+      surveyFlashcard.style.display = 'block';
+      currentQuestionIndex = 0;
+      displayCurrentQuestion();
+    }
+    
+    // Display the current question
+    function displayCurrentQuestion() {
+      const question = questions[currentQuestionIndex];
+      currentQuestionElement.textContent = question.question;
+      optionsContainer.innerHTML = '';
+      question.options.forEach((option, index) => {
+        const button = document.createElement('button');
+        button.textContent = option;
+        button.className = 'option-btn';
+        if (responses[currentQuestionIndex] === index) {
+          button.style.backgroundColor = '#4285f4';
+          button.style.color = 'white';
+        }
+        button.addEventListener('click', () => {
+          document.querySelectorAll('.option-btn').forEach(btn => {
+            btn.style.backgroundColor = '#e8f0fe';
+            btn.style.color = '#333';
+          });
+          button.style.backgroundColor = '#4285f4';
+          button.style.color = 'white';
+          responses[currentQuestionIndex] = index;
+          nextBtn.disabled = false;
+        });
+        optionsContainer.appendChild(button);
+      });
+      const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+      progressBar.style.width = `${progress}%`;
+      prevBtn.disabled = currentQuestionIndex === 0;
+      nextBtn.disabled = responses[currentQuestionIndex] === null;
+    }
+    
+    // Show previous question
+    function showPreviousQuestion() {
+      if (currentQuestionIndex > 0) {
+        currentQuestionIndex--;
+        displayCurrentQuestion();
+      }
+    }
+    
+    // Show next question or finish the survey
+    function showNextQuestion() {
+      if (currentQuestionIndex < questions.length - 1) {
+        currentQuestionIndex++;
+        displayCurrentQuestion();
+      } else {
+        finishSurvey();
+      }
+    }
+    
+    // Submit responses to Google Sheets and finish survey
+    function finishSurvey() {
+      const formattedResponses = questions.map((q, index) => ({
+        question: q.question,
+        selectedOption: q.options[responses[index]],
+        optionIndex: responses[index]
+      }));
+      // Submit the responses to the Google Sheet backend
+      submitSurveyResponses(productData, formattedResponses);
+      surveyFlashcard.style.display = 'none';
+      surveyCompleteSection.classList.remove('hidden');
+    }
+    
+    // Send survey responses to the Google Apps Script endpoint
+    function submitSurveyResponses(productData, formattedResponses) {
+      fetch(webAppUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName: productData.name,
+          responses: formattedResponses
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.result === "success") {
+          console.log("Survey responses saved successfully:", data);
+        } else {
+          console.error("Error saving responses:", data.error);
+        }
+      })
+      .catch(error => console.error("Fetch error:", error));
+    }
+    
+    // Share survey functionality using Web Share API or clipboard fallback
+    function shareSurvey() {
+      const surveyUrl = window.location.href;
+      if (navigator.share) {
+        navigator.share({
+          title: 'Take my survey',
+          text: 'Check out this survey!',
+          url: surveyUrl,
+        }).then(() => {
+          console.log('Survey shared successfully');
+        }).catch((error) => {
+          console.error('Error sharing survey:', error);
+        });
+      } else {
+        navigator.clipboard.writeText(surveyUrl).then(() => {
+          alert('Survey link copied to clipboard');
+        }).catch((error) => {
+          alert('Error copying link to clipboard: ' + error);
+        });
+      }
+    }
+    
+    // Reset survey to start a new one
+    function resetSurvey() {
+      productNameInput.value = '';
+      productDescriptionInput.value = '';
+      studyParametersInput.value = '';
+      numQuestionsInput.value = '5';
+      productImagePreview.innerHTML = '';
+      productData.imageUrl = '';
+      questions = [];
+      surveySection.classList.add('hidden');
+      setupSection.classList.remove('hidden');
+      questionPreviewSection.classList.add('hidden');
+      surveyCompleteSection.classList.add('hidden');
+      statusDiv.textContent = '';
+      errorDiv.textContent = '';
+    }
+    
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
