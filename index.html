@@ -153,7 +153,8 @@
 <body>
   <div class="container">
     <h1>AI-Powered Product Survey</h1>
-    <!-- Setup Section -->
+    
+    <!-- Setup Section (for survey creation) -->
     <div id="setupSection">
       <div class="card">
         <h2>Step 1: Upload Product Information</h2>
@@ -183,12 +184,16 @@
         <div id="status"></div>
         <div id="error"></div>
       </div>
+      
+      <!-- Review Section for the creator -->
       <div class="card hidden" id="questionPreviewSection">
         <h2>Step 2: Review Generated Questions</h2>
         <div id="generatedQuestionsPreview"></div>
         <button id="editQuestionsBtn">Edit Questions</button>
         <button id="startSurveyBtn">Start Survey</button>
+        <button id="publishSurveyBtnAdmin">Publish Survey</button>
       </div>
+      
       <div class="card hidden" id="authSection">
         <h2>Step 3: Connect Google Sheets</h2>
         <p>To save survey responses, please connect to your Google account:</p>
@@ -196,7 +201,8 @@
         <div id="authStatus"></div>
       </div>
     </div>
-    <!-- Survey Section -->
+    
+    <!-- Survey Section (for both admin mode and published/respondent mode) -->
     <div id="surveySection" class="hidden">
       <h2>Product Survey</h2>
       <div class="flashcard" id="surveyFlashcard">
@@ -214,10 +220,12 @@
         <h2>Survey Complete!</h2>
         <p>Thank you for completing the survey. Your responses have been recorded.</p>
         <button id="newSurveyBtn">Create New Survey</button>
+        <!-- In published mode, respondents won’t see admin controls. -->
         <button id="shareSurveyBtn">Share Survey</button>
       </div>
     </div>
   </div>
+  
   <script>
     // Global variables
     let productData = {
@@ -229,11 +237,12 @@
     let questions = [];
     let currentQuestionIndex = 0;
     let responses = [];
-    let googleAuth = null;
     let googleSheetsInitialized = false;
     const GEMINI_API_KEY = "AIzaSyA8R_U1pHmh78Qs3q1PWbAJF_qTgsDFGBc";
-    // Google Apps Script endpoint URL (Google Sheet backend)
+    // Google Apps Script endpoint URL (backend)
     const webAppUrl = "https://script.google.com/macros/s/AKfycbxr0dsUlNKFttZ3Vy6o8WhNNI3QdF0xxXICEOQwTj6kEuFD3l9xGqtZeOh3hvX6hfrC/exec";
+    // Flag to indicate published (respondent) mode
+    let isPublishedMode = false;
     
     // DOM elements
     const setupSection = document.getElementById('setupSection');
@@ -249,6 +258,7 @@
     const generatedQuestionsPreview = document.getElementById('generatedQuestionsPreview');
     const editQuestionsBtn = document.getElementById('editQuestionsBtn');
     const startSurveyBtn = document.getElementById('startSurveyBtn');
+    const publishSurveyBtnAdmin = document.getElementById('publishSurveyBtnAdmin');
     const surveyFlashcard = document.getElementById('surveyFlashcard');
     const currentQuestionElement = document.getElementById('currentQuestion');
     const optionsContainer = document.getElementById('optionsContainer');
@@ -264,17 +274,47 @@
     const errorDiv = document.getElementById('error');
     const aiLoader = document.getElementById('aiLoader');
     
+    // Retrieve survey questions from URL if present (published/respondent mode)
+    function getSurveyFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("survey");
+    }
+    
     // Initialize the application
     function init() {
+      // Set up event listeners (only in admin mode)
       generateQuestionsBtn.addEventListener('click', generateQuestions);
       editQuestionsBtn.addEventListener('click', editQuestions);
       startSurveyBtn.addEventListener('click', startSurvey);
+      publishSurveyBtnAdmin.addEventListener('click', publishSurvey);
       prevBtn.addEventListener('click', showPreviousQuestion);
       nextBtn.addEventListener('click', showNextQuestion);
       newSurveyBtn.addEventListener('click', resetSurvey);
       shareSurveyBtn.addEventListener('click', shareSurvey);
       productImageInput.addEventListener('change', handleImageUpload);
       gapi.load('client', initGoogleSheetsAPI);
+      
+      // Check if a published survey is provided via URL query parameter
+      const surveyParam = getSurveyFromUrl();
+      if (surveyParam) {
+        try {
+          const decoded = atob(surveyParam);
+          questions = JSON.parse(decoded);
+          // Set a default name for published surveys if none was provided
+          productData.name = "Published Survey";
+          isPublishedMode = true;
+          // Hide creation UI and show survey section only
+          setupSection.style.display = "none";
+          questionPreviewSection.style.display = "none";
+          surveySection.classList.remove("hidden");
+          surveyFlashcard.style.display = "block";
+          currentQuestionIndex = 0;
+          responses = Array(questions.length).fill(null);
+          displayCurrentQuestion();
+        } catch (e) {
+          console.error("Failed to parse survey data from URL", e);
+        }
+      }
     }
     
     // Handle product image upload
@@ -293,7 +333,7 @@
       }
     }
     
-    // Initialize Google Sheets API (for auth, if needed)
+    // Initialize Google Sheets API (for auth if needed)
     function initGoogleSheetsAPI() {
       gapi.client.init({
         apiKey: GEMINI_API_KEY,
@@ -411,7 +451,7 @@
       return sampleQuestions;
     }
     
-    // Display questions for review (read-only)
+    // Display questions for review (read-only) in admin mode
     function displayQuestionsForReview(questions) {
       generatedQuestionsPreview.innerHTML = '';
       questions.forEach((q, index) => {
@@ -426,7 +466,7 @@
       });
     }
     
-    // Edit questions using editable input fields
+    // Edit questions using editable input fields (admin mode only)
     function editQuestions() {
       generatedQuestionsPreview.innerHTML = '';
       questions.forEach((q, index) => {
@@ -477,7 +517,7 @@
       generatedQuestionsPreview.appendChild(saveEditBtn);
     }
     
-    // Save changes from edit mode
+    // Save changes from edit mode (admin mode)
     function saveEditedQuestions() {
       questions.forEach((q, index) => {
         const questionInput = document.getElementById(`question-${index}`);
@@ -499,7 +539,7 @@
       editQuestionsBtn.style.display = 'inline-block';
     }
     
-    // Start the survey
+    // Start the survey (admin mode) – switch from creation to taking the survey
     function startSurvey() {
       responses = Array(questions.length).fill(null);
       setupSection.classList.add('hidden');
@@ -509,7 +549,7 @@
       displayCurrentQuestion();
     }
     
-    // Display the current question
+    // Display the current question for taking the survey
     function displayCurrentQuestion() {
       const question = questions[currentQuestionIndex];
       currentQuestionElement.textContent = question.question;
@@ -540,7 +580,7 @@
       nextBtn.disabled = responses[currentQuestionIndex] === null;
     }
     
-    // Show previous question
+    // Navigate to the previous question
     function showPreviousQuestion() {
       if (currentQuestionIndex > 0) {
         currentQuestionIndex--;
@@ -548,7 +588,7 @@
       }
     }
     
-    // Show next question or finish the survey
+    // Navigate to the next question or finish the survey
     function showNextQuestion() {
       if (currentQuestionIndex < questions.length - 1) {
         currentQuestionIndex++;
@@ -558,20 +598,21 @@
       }
     }
     
-    // Submit responses to Google Sheets and finish survey
+    // When survey is finished, submit responses to Google Sheets
     function finishSurvey() {
       const formattedResponses = questions.map((q, index) => ({
         question: q.question,
         selectedOption: q.options[responses[index]],
         optionIndex: responses[index]
       }));
-      // Submit the responses to the Google Sheet backend
+      // In case productData.name is not set (published mode), set a default name
+      if (!productData.name) productData.name = "Published Survey";
       submitSurveyResponses(productData, formattedResponses);
       surveyFlashcard.style.display = 'none';
       surveyCompleteSection.classList.remove('hidden');
     }
     
-    // Send survey responses to the Google Apps Script endpoint
+    // Submit survey responses to the Google Apps Script backend
     function submitSurveyResponses(productData, formattedResponses) {
       fetch(webAppUrl, {
         method: "POST",
@@ -592,7 +633,23 @@
       .catch(error => console.error("Fetch error:", error));
     }
     
-    // Share survey functionality using Web Share API or clipboard fallback
+    // In admin mode: Publish the survey (share only the survey questions)
+    function publishSurvey() {
+      if (!questions || questions.length === 0) {
+        alert("No survey questions available to publish!");
+        return;
+      }
+      const surveyJSON = JSON.stringify(questions);
+      const encoded = btoa(surveyJSON);
+      const shareableUrl = window.location.origin + window.location.pathname + "?survey=" + encodeURIComponent(encoded);
+      navigator.clipboard.writeText(shareableUrl).then(() => {
+        alert("Shareable survey link copied to clipboard:\n" + shareableUrl);
+      }).catch(() => {
+        prompt("Copy this URL:", shareableUrl);
+      });
+    }
+    
+    // Share survey from the respondent side (shares the current URL)
     function shareSurvey() {
       const surveyUrl = window.location.href;
       if (navigator.share) {
@@ -614,7 +671,7 @@
       }
     }
     
-    // Reset survey to start a new one
+    // Reset survey to create a new one (admin mode)
     function resetSurvey() {
       productNameInput.value = '';
       productDescriptionInput.value = '';
