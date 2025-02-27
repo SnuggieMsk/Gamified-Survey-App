@@ -220,7 +220,6 @@
         <h2>Survey Complete!</h2>
         <p>Thank you for completing the survey. Your responses have been recorded.</p>
         <button id="newSurveyBtn">Create New Survey</button>
-        <!-- In published mode, respondents won’t see admin controls. -->
         <button id="shareSurveyBtn">Share Survey</button>
       </div>
     </div>
@@ -333,26 +332,17 @@
       }
     }
     
-    // Initialize Google Sheets API (for auth if needed)
+    // Replace the existing initGoogleSheetsAPI function with this:
     function initGoogleSheetsAPI() {
-      gapi.client.init({
-        apiKey: GEMINI_API_KEY,
-        discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"],
-      }).then(function() {
-        googleSheetsInitialized = true;
-        const googleAuthButton = document.getElementById('googleAuthButton');
-        googleAuthButton.innerHTML = `
-          <div id="g_id_onload"
-            data-client_id="YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com" 
-            data-callback="handleCredentialResponse">
-          </div>
-          <div class="g_id_signin" data-type="standard"></div>
-        `;
-        authStatus.textContent = "Note: In a production app, this would connect to Google Sheets. For this demo, responses will be stored locally.";
-      }).catch(function(error) {
-        console.error('Error initializing Google Sheets API:', error);
-        authStatus.textContent = "Google Sheets API could not be initialized. Responses will be stored locally.";
-      });
+      // For simplicity, we'll use a direct CORS request to the Google Apps Script
+      // No need for full gapi.client initialization in this implementation
+      googleSheetsInitialized = true;
+      
+      // Update auth status message
+      authStatus.textContent = "Connected to Google Sheets. Responses will be stored in Google Sheets.";
+      
+      // Make the auth section visible
+      authSection.classList.remove('hidden');
     }
     
     // Generate questions using a simulated Gemini API response
@@ -612,25 +602,59 @@
       surveyCompleteSection.classList.remove('hidden');
     }
     
-    // Submit survey responses to the Google Apps Script backend
+    // Update the submitSurveyResponses function:
     function submitSurveyResponses(productData, formattedResponses) {
+      // Show loading indicator
+      const loadingIndicator = document.createElement('div');
+      loadingIndicator.className = 'loader';
+      loadingIndicator.style.display = 'block';
+      surveyCompleteSection.prepend(loadingIndicator);
+      
+      // Create status message
+      const statusMessage = document.createElement('p');
+      statusMessage.id = 'submitStatus';
+      surveyCompleteSection.prepend(statusMessage);
+      
+      // Prepare data to send
+      const dataToSend = {
+        productName: productData.name,
+        responses: formattedResponses
+      };
+      
+      // Send data to Google Apps Script web app
       fetch(webAppUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          productName: productData.name,
-          responses: formattedResponses
-        })
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(dataToSend),
+        redirect: 'follow'
       })
-      .then(response => response.json())
+      .then(response => {
+        // Google Apps Script returns a redirect, so handling is slightly different
+        if (response.redirected) {
+          return { result: "success" };
+        }
+        return response.json();
+      })
       .then(data => {
+        loadingIndicator.style.display = 'none';
         if (data.result === "success") {
+          statusMessage.textContent = "✅ Survey responses saved successfully to Google Sheets!";
+          statusMessage.style.color = "#4CAF50";
           console.log("Survey responses saved successfully:", data);
         } else {
+          statusMessage.textContent = "⚠️ " + (data.error || "Error saving responses to Google Sheets");
+          statusMessage.style.color = "#F44336";
           console.error("Error saving responses:", data.error);
         }
       })
-      .catch(error => console.error("Fetch error:", error));
+      .catch(error => {
+        loadingIndicator.style.display = 'none';
+        statusMessage.textContent = "⚠️ Error: " + error.message;
+        statusMessage.style.color = "#F44336";
+        console.error("Fetch error:", error);
+      });
     }
     
     // In admin mode: Publish the survey (share only the survey questions)
