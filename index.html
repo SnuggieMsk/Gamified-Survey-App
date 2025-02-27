@@ -243,45 +243,86 @@
     // Flag to indicate published (respondent) mode
     let isPublishedMode = false;
     
-    // DOM elements
-    const setupSection = document.getElementById('setupSection');
-    const surveySection = document.getElementById('surveySection');
-    const generateQuestionsBtn = document.getElementById('generateQuestionsBtn');
-    const productNameInput = document.getElementById('productName');
-    const productDescriptionInput = document.getElementById('productDescription');
-    const studyParametersInput = document.getElementById('studyParameters');
-    const numQuestionsInput = document.getElementById('numQuestions');
-    const productImageInput = document.getElementById('productImage');
-    const productImagePreview = document.getElementById('productImagePreview');
-    const questionPreviewSection = document.getElementById('questionPreviewSection');
-    const generatedQuestionsPreview = document.getElementById('generatedQuestionsPreview');
-    const editQuestionsBtn = document.getElementById('editQuestionsBtn');
-    const startSurveyBtn = document.getElementById('startSurveyBtn');
-    const publishSurveyBtnAdmin = document.getElementById('publishSurveyBtnAdmin');
-    const surveyFlashcard = document.getElementById('surveyFlashcard');
-    const currentQuestionElement = document.getElementById('currentQuestion');
-    const optionsContainer = document.getElementById('optionsContainer');
-    const progressBar = document.getElementById('progressBar');
-    const prevBtn = document.getElementById('prevBtn');
-    const nextBtn = document.getElementById('nextBtn');
-    const surveyCompleteSection = document.getElementById('surveyCompleteSection');
-    const newSurveyBtn = document.getElementById('newSurveyBtn');
-    const shareSurveyBtn = document.getElementById('shareSurveyBtn');
-    const authSection = document.getElementById('authSection');
-    const authStatus = document.getElementById('authStatus');
-    const statusDiv = document.getElementById('status');
-    const errorDiv = document.getElementById('error');
-    const aiLoader = document.getElementById('aiLoader');
+    // Add these global variables at the top with your other globals
+    let surveyID = null; // Unique ID for each survey
+    const STORAGE_PREFIX = "survey_app_";
     
-    // Retrieve survey questions from URL if present (published/respondent mode)
-    function getSurveyFromUrl() {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("survey");
+    // Generate a unique ID for surveys
+    function generateUniqueID() {
+      return 'survey_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
     
-    // Initialize the application
+    // Modify the publishSurvey function to save the survey data first
+    function publishSurvey() {
+      if (!questions || questions.length === 0) {
+        alert("No survey questions available to publish!");
+        return;
+      }
+      
+      // Generate a unique ID if we don't have one yet
+      if (!surveyID) {
+        surveyID = generateUniqueID();
+      }
+      
+      // Create a survey object with all relevant data
+      const surveyData = {
+        id: surveyID,
+        title: productData.name,
+        description: productData.description,
+        studyParameters: productData.studyParameters,
+        imageUrl: productData.imageUrl,
+        questions: questions,
+        createdDate: new Date().toISOString(),
+        responses: [] // Initialize with empty responses array
+      };
+      
+      // Save to localStorage
+      localStorage.setItem(STORAGE_PREFIX + surveyID, JSON.stringify(surveyData));
+      
+      // Also save to the list of available surveys
+      let surveyList = JSON.parse(localStorage.getItem(STORAGE_PREFIX + "survey_list") || "[]");
+      if (!surveyList.includes(surveyID)) {
+        surveyList.push(surveyID);
+        localStorage.setItem(STORAGE_PREFIX + "survey_list", JSON.stringify(surveyList));
+      }
+      
+      // Now create the shareable URL with the survey ID
+      const shareableUrl = window.location.origin + window.location.pathname + "?survey=" + encodeURIComponent(surveyID);
+      
+      navigator.clipboard.writeText(shareableUrl).then(() => {
+        alert("Survey published! Shareable link copied to clipboard:\n" + shareableUrl);
+      }).catch(() => {
+        prompt("Survey published! Copy this URL:", shareableUrl);
+      });
+    }
+    
+    // Update getSurveyFromUrl to handle either encoded survey data or survey ID
+    function getSurveyFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const surveyParam = params.get("survey");
+      
+      if (!surveyParam) return null;
+      
+      // First, try to load as a survey ID from localStorage
+      const storedSurvey = localStorage.getItem(STORAGE_PREFIX + surveyParam);
+      if (storedSurvey) {
+        return { type: "id", value: surveyParam };
+      }
+      
+      // If not found in localStorage, try to decode as base64 JSON (legacy support)
+      try {
+        const decoded = atob(surveyParam);
+        JSON.parse(decoded); // Just to validate
+        return { type: "data", value: surveyParam };
+      } catch (e) {
+        console.error("Failed to parse survey data from URL", e);
+        return null;
+      }
+    }
+    
+    // Update the init function to handle the new survey loading approach
     function init() {
-      // Set up event listeners (only in admin mode)
+      // Set up event listeners (same as before)
       generateQuestionsBtn.addEventListener('click', generateQuestions);
       editQuestionsBtn.addEventListener('click', editQuestions);
       startSurveyBtn.addEventListener('click', startSurvey);
@@ -291,169 +332,484 @@
       newSurveyBtn.addEventListener('click', resetSurvey);
       shareSurveyBtn.addEventListener('click', shareSurvey);
       productImageInput.addEventListener('change', handleImageUpload);
-      gapi.load('client', initGoogleSheetsAPI);
       
-      // Check if a published survey is provided via URL query parameter
+      // Add a new button to view all surveys and export responses
+      const manageSurveysBtn = document.createElement('button');
+      manageSurveysBtn.id = 'manageSurveysBtn';
+      manageSurveysBtn.textContent = 'Manage Surveys';
+      manageSurveysBtn.addEventListener('click', showSurveyManager);
+      newSurveyBtn.parentNode.appendChild(manageSurveysBtn);
+      
+      // Check if a published survey is provided via URL
       const surveyParam = getSurveyFromUrl();
       if (surveyParam) {
-        try {
-          const decoded = atob(surveyParam);
-          questions = JSON.parse(decoded);
-          // Set a default name for published surveys if none was provided
-          productData.name = "Published Survey";
-          isPublishedMode = true;
-          // Hide creation UI and show survey section only
-          setupSection.style.display = "none";
-          questionPreviewSection.style.display = "none";
-          surveySection.classList.remove("hidden");
-          surveyFlashcard.style.display = "block";
-          currentQuestionIndex = 0;
-          responses = Array(questions.length).fill(null);
-          displayCurrentQuestion();
-        } catch (e) {
-          console.error("Failed to parse survey data from URL", e);
+        if (surveyParam.type === "id") {
+          // Load from localStorage by ID
+          loadSurveyById(surveyParam.value);
+        } else {
+          // Legacy: Load from encoded data
+          try {
+            const decoded = atob(surveyParam.value);
+            questions = JSON.parse(decoded);
+            productData.name = "Published Survey";
+            isPublishedMode = true;
+            setupSection.style.display = "none";
+            questionPreviewSection.style.display = "none";
+            surveySection.classList.remove("hidden");
+            surveyFlashcard.style.display = "block";
+            currentQuestionIndex = 0;
+            responses = Array(questions.length).fill(null);
+            displayCurrentQuestion();
+          } catch (e) {
+            console.error("Failed to parse survey data from URL", e);
+          }
         }
       }
     }
     
-    // Handle product image upload
-    function handleImageUpload(event) {
-      const file = event.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
+    // Function to load a survey by ID
+    function loadSurveyById(id) {
+      const storedSurveyJSON = localStorage.getItem(STORAGE_PREFIX + id);
+      if (!storedSurveyJSON) {
+        alert('Survey not found!');
+        return;
+      }
+      
+      const storedSurvey = JSON.parse(storedSurveyJSON);
+      surveyID = storedSurvey.id;
+      questions = storedSurvey.questions;
+      
+      if (!isPublishedMode) {
+        // Admin mode - loading for editing
+        productData = {
+          name: storedSurvey.title || "Unnamed Survey",
+          description: storedSurvey.description || "",
+          studyParameters: storedSurvey.studyParameters || "",
+          imageUrl: storedSurvey.imageUrl || ""
+        };
+        
+        // Fill the form fields
+        productNameInput.value = productData.name;
+        productDescriptionInput.value = productData.description;
+        studyParametersInput.value = productData.studyParameters;
+        
+        if (productData.imageUrl) {
           const img = document.createElement('img');
-          img.src = e.target.result;
-          productData.imageUrl = e.target.result;
+          img.src = productData.imageUrl;
           productImagePreview.innerHTML = '';
           productImagePreview.appendChild(img);
         }
-        reader.readAsDataURL(file);
+        
+        displayQuestionsForReview(questions);
+        questionPreviewSection.classList.remove('hidden');
+      } else {
+        // Respondent mode - taking the survey
+        productData.name = storedSurvey.title || "Published Survey";
+        setupSection.style.display = "none";
+        questionPreviewSection.style.display = "none";
+        surveySection.classList.remove("hidden");
+        surveyFlashcard.style.display = "block";
+        currentQuestionIndex = 0;
+        responses = Array(questions.length).fill(null);
+        displayCurrentQuestion();
       }
     }
     
-    // Replace the existing initGoogleSheetsAPI function with this:
-    function initGoogleSheetsAPI() {
-      // For simplicity, we'll use a direct CORS request to the Google Apps Script
-      // No need for full gapi.client initialization in this implementation
-      googleSheetsInitialized = true;
+    // Update finishSurvey to store responses locally
+    function finishSurvey() {
+      const formattedResponses = questions.map((q, index) => ({
+        question: q.question,
+        selectedOption: q.options[responses[index]],
+        optionIndex: responses[index]
+      }));
       
-      // Update auth status message
-      authStatus.textContent = "Connected to Google Sheets. Responses will be stored in Google Sheets.";
+      // In case productData.name is not set (published mode), set a default name
+      if (!productData.name) productData.name = "Published Survey";
       
-      // Make the auth section visible
-      authSection.classList.remove('hidden');
+      // Store responses
+      saveSurveyResponse(formattedResponses);
+      
+      surveyFlashcard.style.display = 'none';
+      surveyCompleteSection.classList.remove('hidden');
+      
+      // Show confirmation message
+      const statusMessage = document.createElement('p');
+      statusMessage.id = 'submitStatus';
+      statusMessage.textContent = '✅ Your responses have been recorded. Thank you!';
+      statusMessage.style.color = '#4CAF50';
+      if (!document.getElementById('submitStatus')) {
+        surveyCompleteSection.prepend(statusMessage);
+      }
     }
     
-    // Generate questions using a simulated Gemini API response
-    async function generateQuestions() {
-      if (!validateInputs()) return;
-      aiLoader.style.display = 'block';
-      statusDiv.textContent = 'Generating questions...';
-      errorDiv.textContent = '';
-      productData = {
-        name: productNameInput.value,
-        description: productDescriptionInput.value,
-        imageUrl: productData.imageUrl,
-        studyParameters: studyParametersInput.value
+    // Function to save survey responses
+    function saveSurveyResponse(formattedResponses) {
+      if (!surveyID) {
+        console.error("No survey ID found");
+        return;
+      }
+      
+      // Get the current survey data
+      const storedSurveyJSON = localStorage.getItem(STORAGE_PREFIX + surveyID);
+      if (!storedSurveyJSON) {
+        console.error("Survey not found:", surveyID);
+        return;
+      }
+      
+      const surveyData = JSON.parse(storedSurveyJSON);
+      
+      // Add this response with timestamp
+      const newResponse = {
+        id: 'resp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        timestamp: new Date().toISOString(),
+        answers: formattedResponses
       };
-      const numQuestions = parseInt(numQuestionsInput.value);
-      try {
-        setTimeout(() => {
-          questions = generateSampleQuestions(productData, numQuestions);
-          displayQuestionsForReview(questions);
-          aiLoader.style.display = 'none';
-          statusDiv.textContent = 'Questions generated successfully!';
-          questionPreviewSection.classList.remove('hidden');
-        }, 1500);
-      } catch (error) {
-        aiLoader.style.display = 'none';
-        errorDiv.textContent = `Error generating questions: ${error.message}`;
-        console.error('Error generating questions:', error);
-      }
+      
+      surveyData.responses.push(newResponse);
+      
+      // Save updated survey data
+      localStorage.setItem(STORAGE_PREFIX + surveyID, JSON.stringify(surveyData));
+      
+      console.log("Response saved:", newResponse);
     }
     
-    // Validate user inputs
-    function validateInputs() {
-      let isValid = true;
-      errorDiv.textContent = '';
-      if (!productNameInput.value.trim()) {
-        errorDiv.textContent += 'Please enter a product name. ';
-        isValid = false;
+    // Function to show the survey manager UI
+    function showSurveyManager() {
+      // Create a modal/dialog for the survey manager
+      const modal = document.createElement('div');
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.width = '100%';
+      modal.style.height = '100%';
+      modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+      modal.style.display = 'flex';
+      modal.style.justifyContent = 'center';
+      modal.style.alignItems = 'center';
+      modal.style.zIndex = '1000';
+      
+      const modalContent = document.createElement('div');
+      modalContent.style.backgroundColor = 'white';
+      modalContent.style.padding = '20px';
+      modalContent.style.borderRadius = '10px';
+      modalContent.style.maxWidth = '800px';
+      modalContent.style.width = '90%';
+      modalContent.style.maxHeight = '80vh';
+      modalContent.style.overflow = 'auto';
+      
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = 'Close';
+      closeBtn.style.float = 'right';
+      closeBtn.addEventListener('click', () => {
+        document.body.removeChild(modal);
+      });
+      
+      const title = document.createElement('h2');
+      title.textContent = 'Manage Your Surveys';
+      
+      modalContent.appendChild(closeBtn);
+      modalContent.appendChild(title);
+      
+      // Get list of all surveys
+      const surveyList = JSON.parse(localStorage.getItem(STORAGE_PREFIX + "survey_list") || "[]");
+      
+      if (surveyList.length === 0) {
+        const noSurveys = document.createElement('p');
+        noSurveys.textContent = 'No surveys found.';
+        modalContent.appendChild(noSurveys);
+      } else {
+        const surveyTable = document.createElement('table');
+        surveyTable.style.width = '100%';
+        surveyTable.style.borderCollapse = 'collapse';
+        surveyTable.style.marginTop = '20px';
+        
+        // Table header
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        ['Survey Title', 'Created Date', 'Responses', 'Actions'].forEach(text => {
+          const th = document.createElement('th');
+          th.textContent = text;
+          th.style.padding = '10px';
+          th.style.textAlign = 'left';
+          th.style.borderBottom = '2px solid #ddd';
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        surveyTable.appendChild(thead);
+        
+        // Table body
+        const tbody = document.createElement('tbody');
+        
+        surveyList.forEach(surveyId => {
+          const surveyData = JSON.parse(localStorage.getItem(STORAGE_PREFIX + surveyId) || "null");
+          if (!surveyData) return; // Skip if data is corrupted
+          
+          const row = document.createElement('tr');
+          row.style.borderBottom = '1px solid #ddd';
+          
+          // Survey title
+          const titleCell = document.createElement('td');
+          titleCell.textContent = surveyData.title || "Unnamed Survey";
+          titleCell.style.padding = '10px';
+          row.appendChild(titleCell);
+          
+          // Created date
+          const dateCell = document.createElement('td');
+          const createdDate = surveyData.createdDate ? new Date(surveyData.createdDate) : new Date();
+          dateCell.textContent = createdDate.toLocaleDateString();
+          dateCell.style.padding = '10px';
+          row.appendChild(dateCell);
+          
+          // Number of responses
+          const responsesCell = document.createElement('td');
+          const responseCount = surveyData.responses ? surveyData.responses.length : 0;
+          responsesCell.textContent = responseCount;
+          responsesCell.style.padding = '10px';
+          row.appendChild(responsesCell);
+          
+          // Actions
+          const actionsCell = document.createElement('td');
+          actionsCell.style.padding = '10px';
+          
+          // Edit button
+          const editBtn = document.createElement('button');
+          editBtn.textContent = 'Edit';
+          editBtn.style.marginRight = '5px';
+          editBtn.addEventListener('click', () => {
+            document.body.removeChild(modal);
+            loadSurveyById(surveyId);
+          });
+          actionsCell.appendChild(editBtn);
+          
+          // Export button
+          const exportBtn = document.createElement('button');
+          exportBtn.textContent = 'Export CSV';
+          exportBtn.disabled = responseCount === 0;
+          exportBtn.addEventListener('click', () => {
+            exportResponsesAsCSV(surveyId);
+          });
+          actionsCell.appendChild(exportBtn);
+          
+          // Share button
+          const shareBtn = document.createElement('button');
+          shareBtn.textContent = 'Share';
+          shareBtn.style.marginLeft = '5px';
+          shareBtn.addEventListener('click', () => {
+            const shareableUrl = window.location.origin + window.location.pathname + "?survey=" + encodeURIComponent(surveyId);
+            navigator.clipboard.writeText(shareableUrl).then(() => {
+              alert("Shareable link copied to clipboard:\n" + shareableUrl);
+            }).catch(() => {
+              prompt("Copy this URL:", shareableUrl);
+            });
+          });
+          actionsCell.appendChild(shareBtn);
+          
+          // Delete button
+          const deleteBtn = document.createElement('button');
+          deleteBtn.textContent = 'Delete';
+          deleteBtn.style.marginLeft = '5px';
+          deleteBtn.style.backgroundColor = '#ff4444';
+          deleteBtn.addEventListener('click', () => {
+            if (confirm(`Are you sure you want to delete "${surveyData.title || "Unnamed Survey"}"? This will delete all responses as well.`)) {
+              localStorage.removeItem(STORAGE_PREFIX + surveyId);
+              const updatedList = surveyList.filter(id => id !== surveyId);
+              localStorage.setItem(STORAGE_PREFIX + "survey_list", JSON.stringify(updatedList));
+              row.remove();
+              if (tbody.children.length === 0) {
+                const noSurveys = document.createElement('p');
+                noSurveys.textContent = 'No surveys found.';
+                modalContent.replaceChild(noSurveys, surveyTable);
+              }
+            }
+          });
+          actionsCell.appendChild(deleteBtn);
+          
+          row.appendChild(actionsCell);
+          tbody.appendChild(row);
+        });
+        
+        surveyTable.appendChild(tbody);
+        modalContent.appendChild(surveyTable);
       }
-      if (!productDescriptionInput.value.trim()) {
-        errorDiv.textContent += 'Please enter a product description. ';
-        isValid = false;
+      
+      // Add clear all button
+      if (surveyList.length > 0) {
+        const clearAllBtn = document.createElement('button');
+        clearAllBtn.textContent = 'Clear All Surveys';
+        clearAllBtn.style.marginTop = '20px';
+        clearAllBtn.style.backgroundColor = '#ff4444';
+        clearAllBtn.addEventListener('click', () => {
+          if (confirm("Are you sure you want to delete ALL surveys and their responses? This cannot be undone.")) {
+            surveyList.forEach(surveyId => {
+              localStorage.removeItem(STORAGE_PREFIX + surveyId);
+            });
+            localStorage.removeItem(STORAGE_PREFIX + "survey_list");
+            document.body.removeChild(modal);
+            showSurveyManager(); // Refresh the modal
+          }
+        });
+        modalContent.appendChild(clearAllBtn);
       }
-      if (!studyParametersInput.value.trim()) {
-        errorDiv.textContent += 'Please enter study parameters. ';
-        isValid = false;
-      }
-      const numQuestions = parseInt(numQuestionsInput.value);
-      if (isNaN(numQuestions) || numQuestions < 1 || numQuestions > 20) {
-        errorDiv.textContent += 'Please enter a valid number of questions (1-20). ';
-        isValid = false;
-      }
-      return isValid;
+      
+      modal.appendChild(modalContent);
+      document.body.appendChild(modal);
     }
     
-    // Generate sample questions (for demo purposes)
-    function generateSampleQuestions(productData, numQuestions) {
-      const questionTypes = [
-        `How would you rate the overall design of the ${productData.name}?`,
-        `What feature of the ${productData.name} do you find most appealing?`,
-        `How likely are you to recommend the ${productData.name} to a friend?`,
-        `What would make you purchase the ${productData.name}?`,
-        `How much would you be willing to pay for the ${productData.name}?`,
-        `What improvement would you suggest for the ${productData.name}?`,
-        `How does the ${productData.name} compare to similar products you've used?`,
-        `What is your first impression of the ${productData.name}?`,
-        `How important is sustainability in your decision to purchase the ${productData.name}?`,
-        `What colors would you prefer for the ${productData.name}?`
-      ];
-      const sampleQuestions = [];
-      const questionsToGenerate = Math.min(numQuestions, questionTypes.length);
-      const selectedQuestionIndices = new Set();
-      while (selectedQuestionIndices.size < questionsToGenerate) {
-        selectedQuestionIndices.add(Math.floor(Math.random() * questionTypes.length));
+    // Function to export survey responses as CSV
+    function exportResponsesAsCSV(surveyId) {
+      const surveyData = JSON.parse(localStorage.getItem(STORAGE_PREFIX + surveyId));
+      if (!surveyData || !surveyData.responses || surveyData.responses.length === 0) {
+        alert('No responses to export!');
+        return;
       }
-      Array.from(selectedQuestionIndices).forEach(index => {
-        const question = questionTypes[index];
-        let options = [];
-        if (question.includes('rate')) {
-          options = ['Poor', 'Fair', 'Good', 'Very Good', 'Excellent'];
-        } else if (question.includes('likely')) {
-          options = ['Not at all likely', 'Somewhat unlikely', 'Neutral', 'Somewhat likely', 'Very likely'];
-        } else if (question.includes('willing to pay')) {
-          options = ['$10-$20', '$21-$50', '$51-$100', '$101-$200', 'More than $200'];
-        } else if (question.includes('colors')) {
-          options = ['Black', 'White', 'Blue', 'Red', 'Green'];
-        } else if (question.includes('important')) {
-          options = ['Not important', 'Slightly important', 'Moderately important', 'Very important', 'Extremely important'];
-        } else {
-          options = ['Option 1', 'Option 2', 'Option 3', 'Option 4'];
-        }
-        sampleQuestions.push({
-          question: question,
-          options: options
+      
+      // Create CSV header
+      let csvContent = "data:text/csv;charset=utf-8,";
+      
+      // Add survey information
+      csvContent += "Survey Title:," + (surveyData.title || "Unnamed Survey") + "\r\n";
+      csvContent += "Survey Description:," + (surveyData.description || "") + "\r\n";
+      csvContent += "Study Parameters:," + (surveyData.studyParameters || "") + "\r\n";
+      csvContent += "Total Responses:," + surveyData.responses.length + "\r\n\r\n";
+      
+      // Create header row with all question texts
+      const headerRow = ["Response ID", "Timestamp"];
+      surveyData.questions.forEach(question => {
+        headerRow.push(question.question);
+      });
+      csvContent += headerRow.join(",") + "\r\n";
+      
+      // Add response rows
+      surveyData.responses.forEach(response => {
+        const row = [
+          response.id,
+          response.timestamp
+        ];
+        
+        // Map response answers to questions by their index
+        surveyData.questions.forEach((question, qIndex) => {
+          const answer = response.answers.find(a => a.question === question.question);
+          row.push(answer ? answer.selectedOption : "No response");
+        });
+        
+        csvContent += row.join(",") + "\r\n";
+      });
+      
+      // Create summary section
+      csvContent += "\r\nSUMMARY STATISTICS\r\n";
+      csvContent += "Question,Option,Count,Percentage\r\n";
+      
+      // Calculate counts for each question and option
+      surveyData.questions.forEach(question => {
+        const optionCounts = {};
+        let totalResponses = 0;
+        
+        // Count responses for each option
+        surveyData.responses.forEach(response => {
+          const answer = response.answers.find(a => a.question === question.question);
+          if (answer) {
+            optionCounts[answer.selectedOption] = (optionCounts[answer.selectedOption] || 0) + 1;
+            totalResponses++;
+          }
+        });
+        
+        // Add summary rows for this question
+        Object.keys(optionCounts).forEach(option => {
+          const count = optionCounts[option];
+          const percentage = (count / totalResponses * 100).toFixed(2) + "%";
+          csvContent += `"${question.question}","${option}",${count},${percentage}\r\n`;
         });
       });
-      return sampleQuestions;
+      
+      // Create a link and trigger download
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `survey_responses_${surveyData.title || "unnamed"}_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
     
-    // Display questions for review (read-only) in admin mode
-    function displayQuestionsForReview(questions) {
-      generatedQuestionsPreview.innerHTML = '';
-      questions.forEach((q, index) => {
-        const questionElement = document.createElement('div');
-        questionElement.className = 'card';
-        questionElement.innerHTML = `
-          <h3>Question ${index + 1}</h3>
-          <p>${q.question}</p>
-          <p><strong>Options:</strong> ${q.options.join(', ')}</p>
-        `;
-        generatedQuestionsPreview.appendChild(questionElement);
+    // In admin mode: Share survey from the respondent side (shares the current URL)
+    function shareSurvey() {
+      const surveyUrl = window.location.href;
+      if (navigator.share) {
+        navigator.share({
+          title: 'Take my survey',
+          text: 'Check out this survey!',
+          url: surveyUrl,
+        }).then(() => {
+          console.log('Survey shared successfully');
+        }).catch((error) => {
+          console.error('Error sharing survey:', error);
+        });
+      } else {
+        navigator.clipboard.writeText(surveyUrl).then(() => {
+          alert('Survey link copied to clipboard');
+        }).catch((error) => {
+          alert('Error copying link to clipboard: ' + error);
+        });
+      }
+    }
+    
+    // Start the survey (admin mode) – switch from creation to taking the survey
+    function startSurvey() {
+      responses = Array(questions.length).fill(null);
+      setupSection.classList.add('hidden');
+      surveySection.classList.remove('hidden');
+      surveyFlashcard.style.display = 'block';
+      currentQuestionIndex = 0;
+      displayCurrentQuestion();
+    }
+    
+    // Display the current question for taking the survey
+    function displayCurrentQuestion() {
+      const question = questions[currentQuestionIndex];
+      currentQuestionElement.textContent = question.question;
+      optionsContainer.innerHTML = '';
+      question.options.forEach((option, index) => {
+        const button = document.createElement('button');
+        button.textContent = option;
+        button.className = 'option-btn';
+        if (responses[currentQuestionIndex] === index) {
+          button.style.backgroundColor = '#4285f4';
+          button.style.color = 'white';
+        }
+        button.addEventListener('click', () => {
+          document.querySelectorAll('.option-btn').forEach(btn => {
+            btn.style.backgroundColor = '#e8f0fe';
+            btn.style.color = '#333';
+          });
+          button.style.backgroundColor = '#4285f4';
+          button.style.color = 'white';
+          responses[currentQuestionIndex] = index;
+          nextBtn.disabled = false;
+        });
+        optionsContainer.appendChild(button);
       });
+      const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+      progressBar.style.width = `${progress}%`;
+      prevBtn.disabled = currentQuestionIndex === 0;
+      nextBtn.disabled = responses[currentQuestionIndex] === null;
+    }
+    
+    // Navigate to the previous question
+    function showPreviousQuestion() {
+      if (currentQuestionIndex > 0) {
+        currentQuestionIndex--;
+        displayCurrentQuestion();
+      }
+    }
+    
+    // Navigate to the next question or finish the survey
+    function showNextQuestion() {
+      if (currentQuestionIndex < questions.length - 1) {
+        currentQuestionIndex++;
+        displayCurrentQuestion();
+      } else {
+        finishSurvey();
+      }
     }
     
     // Edit questions using editable input fields (admin mode only)
@@ -529,187 +885,19 @@
       editQuestionsBtn.style.display = 'inline-block';
     }
     
-    // Start the survey (admin mode) – switch from creation to taking the survey
-    function startSurvey() {
-      responses = Array(questions.length).fill(null);
-      setupSection.classList.add('hidden');
-      surveySection.classList.remove('hidden');
-      surveyFlashcard.style.display = 'block';
-      currentQuestionIndex = 0;
-      displayCurrentQuestion();
-    }
-    
-    // Display the current question for taking the survey
-    function displayCurrentQuestion() {
-      const question = questions[currentQuestionIndex];
-      currentQuestionElement.textContent = question.question;
-      optionsContainer.innerHTML = '';
-      question.options.forEach((option, index) => {
-        const button = document.createElement('button');
-        button.textContent = option;
-        button.className = 'option-btn';
-        if (responses[currentQuestionIndex] === index) {
-          button.style.backgroundColor = '#4285f4';
-          button.style.color = 'white';
-        }
-        button.addEventListener('click', () => {
-          document.querySelectorAll('.option-btn').forEach(btn => {
-            btn.style.backgroundColor = '#e8f0fe';
-            btn.style.color = '#333';
-          });
-          button.style.backgroundColor = '#4285f4';
-          button.style.color = 'white';
-          responses[currentQuestionIndex] = index;
-          nextBtn.disabled = false;
-        });
-        optionsContainer.appendChild(button);
+    // Display questions for review (read-only) in admin mode
+    function displayQuestionsForReview(questions) {
+      generatedQuestionsPreview.innerHTML = '';
+      questions.forEach((q, index) => {
+        const questionElement = document.createElement('div');
+        questionElement.className = 'card';
+        questionElement.innerHTML = `
+          <h3>Question ${index + 1}</h3>
+          <p>${q.question}</p>
+          <p><strong>Options:</strong> ${q.options.join(', ')}</p>
+        `;
+        generatedQuestionsPreview.appendChild(questionElement);
       });
-      const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
-      progressBar.style.width = `${progress}%`;
-      prevBtn.disabled = currentQuestionIndex === 0;
-      nextBtn.disabled = responses[currentQuestionIndex] === null;
-    }
-    
-    // Navigate to the previous question
-    function showPreviousQuestion() {
-      if (currentQuestionIndex > 0) {
-        currentQuestionIndex--;
-        displayCurrentQuestion();
-      }
-    }
-    
-    // Navigate to the next question or finish the survey
-    function showNextQuestion() {
-      if (currentQuestionIndex < questions.length - 1) {
-        currentQuestionIndex++;
-        displayCurrentQuestion();
-      } else {
-        finishSurvey();
-      }
-    }
-    
-    // When survey is finished, submit responses to Google Sheets
-    function finishSurvey() {
-      const formattedResponses = questions.map((q, index) => ({
-        question: q.question,
-        selectedOption: q.options[responses[index]],
-        optionIndex: responses[index]
-      }));
-      // In case productData.name is not set (published mode), set a default name
-      if (!productData.name) productData.name = "Published Survey";
-      submitSurveyResponses(productData, formattedResponses);
-      surveyFlashcard.style.display = 'none';
-      surveyCompleteSection.classList.remove('hidden');
-    }
-    
-    // Update the submitSurveyResponses function:
-    function submitSurveyResponses(productData, formattedResponses) {
-      // Show loading indicator
-      const loadingIndicator = document.createElement('div');
-      loadingIndicator.className = 'loader';
-      loadingIndicator.style.display = 'block';
-      surveyCompleteSection.prepend(loadingIndicator);
-      
-      // Create status message
-      const statusMessage = document.createElement('p');
-      statusMessage.id = 'submitStatus';
-      surveyCompleteSection.prepend(statusMessage);
-      
-      // Prepare data to send
-      const dataToSend = {
-        productName: productData.name,
-        responses: formattedResponses
-      };
-      
-      // Send data to Google Apps Script web app
-      fetch(webAppUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(dataToSend),
-        redirect: 'follow'
-      })
-      .then(response => {
-        // Google Apps Script returns a redirect, so handling is slightly different
-        if (response.redirected) {
-          return { result: "success" };
-        }
-        return response.json();
-      })
-      .then(data => {
-        loadingIndicator.style.display = 'none';
-        if (data.result === "success") {
-          statusMessage.textContent = "✅ Survey responses saved successfully to Google Sheets!";
-          statusMessage.style.color = "#4CAF50";
-          console.log("Survey responses saved successfully:", data);
-        } else {
-          statusMessage.textContent = "⚠️ " + (data.error || "Error saving responses to Google Sheets");
-          statusMessage.style.color = "#F44336";
-          console.error("Error saving responses:", data.error);
-        }
-      })
-      .catch(error => {
-        loadingIndicator.style.display = 'none';
-        statusMessage.textContent = "⚠️ Error: " + error.message;
-        statusMessage.style.color = "#F44336";
-        console.error("Fetch error:", error);
-      });
-    }
-    
-    // In admin mode: Publish the survey (share only the survey questions)
-    function publishSurvey() {
-      if (!questions || questions.length === 0) {
-        alert("No survey questions available to publish!");
-        return;
-      }
-      const surveyJSON = JSON.stringify(questions);
-      const encoded = btoa(surveyJSON);
-      const shareableUrl = window.location.origin + window.location.pathname + "?survey=" + encodeURIComponent(encoded);
-      navigator.clipboard.writeText(shareableUrl).then(() => {
-        alert("Shareable survey link copied to clipboard:\n" + shareableUrl);
-      }).catch(() => {
-        prompt("Copy this URL:", shareableUrl);
-      });
-    }
-    
-    // Share survey from the respondent side (shares the current URL)
-    function shareSurvey() {
-      const surveyUrl = window.location.href;
-      if (navigator.share) {
-        navigator.share({
-          title: 'Take my survey',
-          text: 'Check out this survey!',
-          url: surveyUrl,
-        }).then(() => {
-          console.log('Survey shared successfully');
-        }).catch((error) => {
-          console.error('Error sharing survey:', error);
-        });
-      } else {
-        navigator.clipboard.writeText(surveyUrl).then(() => {
-          alert('Survey link copied to clipboard');
-        }).catch((error) => {
-          alert('Error copying link to clipboard: ' + error);
-        });
-      }
-    }
-    
-    // Reset survey to create a new one (admin mode)
-    function resetSurvey() {
-      productNameInput.value = '';
-      productDescriptionInput.value = '';
-      studyParametersInput.value = '';
-      numQuestionsInput.value = '5';
-      productImagePreview.innerHTML = '';
-      productData.imageUrl = '';
-      questions = [];
-      surveySection.classList.add('hidden');
-      setupSection.classList.remove('hidden');
-      questionPreviewSection.classList.add('hidden');
-      surveyCompleteSection.classList.add('hidden');
-      statusDiv.textContent = '';
-      errorDiv.textContent = '';
     }
     
     document.addEventListener('DOMContentLoaded', init);
